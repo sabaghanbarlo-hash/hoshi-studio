@@ -1,0 +1,60 @@
+name: Hoshi Studio Auto Post
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+    - cron: "30 5 * * *"
+    - cron: "30 8 * * *"
+    - cron: "30 11 * * *"
+    - cron: "30 14 * * *"
+    - cron: "30 17 * * *"
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+    inputs:
+      post_index:
+        description: "Post index (0-209)"
+        required: false
+        default: ""
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Calculate post index
+        id: calc
+        run: |
+          python3 << 'PYEOF'
+          import os
+          from datetime import datetime, timezone, timedelta
+          tehran_tz = timezone(timedelta(hours=3, minutes=30))
+          now = datetime.now(tehran_tz)
+          start = datetime(2026, 7, 2, tzinfo=tehran_tz)
+          day = max(0, (now - start).days)
+          hour_slots = [6, 9, 12, 15, 18, 21, 0]
+          best_slot = min(range(7), key=lambda i: abs(now.hour - hour_slots[i]))
+          post_index = (day * 7 + best_slot) % 210
+          print(f"Tehran: {now.strftime('%H:%M')}, Day: {day}, Slot: {best_slot}, Index: {post_index}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"post_index={post_index}\n")
+          PYEOF
+      - name: Resolve final index
+        id: final
+        run: |
+          MANUAL="${{ github.event.inputs.post_index }}"
+          AUTO="${{ steps.calc.outputs.post_index }}"
+          if [ -n "$MANUAL" ]; then
+            echo "post_index=$MANUAL" >> $GITHUB_OUTPUT
+          else
+            echo "post_index=$AUTO" >> $GITHUB_OUTPUT
+          fi
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          POST_INDEX: ${{ steps.final.outputs.post_index }}
+        run: python3 poster.py
